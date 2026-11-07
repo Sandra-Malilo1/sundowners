@@ -9,9 +9,7 @@ import React, {
 import {
   motion,
   AnimatePresence,
-  useMotionValue,
   useTransform,
-  useSpring,
   useScroll,
 } from "framer-motion";
 import { createClient } from "@/lib/supabase";
@@ -65,39 +63,23 @@ interface SearchFilters {
 
 const FALLBACK_PROPERTIES: StayProperty[] = [];
 
+
 async function fetchStayProperties(): Promise<StayProperty[]> {
   const supabase = createClient();
 
-  const { data: listings, error } = await supabase
-    .from("listings")
+  const { data, error } = await supabase
+    .from("properties")
     .select(
       `
-      id,
-      title,
-      description,
-      location_text,
-      base_price,
-      currency,
-      type,
-      rating_average,
-      review_count,
-      owner_id,
-      properties (
-        id,
-        bedrooms,
-        bathrooms,
-        max_guests,
-        profiles (
-          id,
-          full_name,
-          verification_status
-        )
-      )
+      id, title, description, location_name, county, type,
+      price_per_night, max_guests, bedrooms, bathrooms,
+      rating_average, review_count, host_id,
+      property_images ( storage_path, position, is_cover ),
+      property_amenities ( amenities ( name ) )
     `
     )
-    .eq("type", "stay")
     .eq("status", "published")
-    .order("is_featured", { ascending: false })
+    .is("deleted_at", null)
     .order("rating_average", { ascending: false })
     .limit(24);
 
@@ -106,89 +88,46 @@ async function fetchStayProperties(): Promise<StayProperty[]> {
     return [];
   }
 
-  if (!listings || listings.length === 0) {
-    return [];
-  }
-
-  const listingIds = listings.map(
-    (listing: { id: string }) => listing.id
-  );
-
-  const { data: images } = await supabase
-    .from("listing_images")
-    .select("listing_id, url, sort_order, is_cover")
-    .in("listing_id", listingIds)
-    .order("sort_order", { ascending: true });
-
-  const propertyIds = listings
-    .map(
-      (listing: any) =>
-        listing.properties?.[0]?.id as string | undefined
-    )
-    .filter((id: any): id is string => Boolean(id));
-
-  const { data: propertyAmenities } = await supabase
-    .from("property_amenities")
-    .select(
-      `
-      property_id,
-      amenities (
-        name
+  return (data ?? []).map((row: any) => {
+    const photos = [...(row.property_images ?? [])]
+      .sort(
+        (a: any, b: any) =>
+          Number(b.is_cover) - Number(a.is_cover) || a.position - b.position
       )
-    `
-    )
-    .in("property_id", propertyIds);
+      .map(
+        (img: any) =>
+          supabase.storage
+            .from("property-images")
+            .getPublicUrl(img.storage_path).data.publicUrl
+      );
 
-  const imagesByListing = new Map<string, string[]>();
-  const amenitiesByProperty = new Map<string, string[]>();
-
-  for (const image of images ?? []) {
-    const current = imagesByListing.get(image.listing_id) ?? [];
-    current.push(image.url);
-    imagesByListing.set(image.listing_id, current);
-  }
-
-  for (const item of propertyAmenities ?? []) {
-    const current =
-      amenitiesByProperty.get(item.property_id) ?? [];
-
-    if (item.amenities?.[0]?.name) {
-      current.push(item.amenities[0].name);
-    }
-
-    amenitiesByProperty.set(item.property_id, current);
-  }
-
-  return listings.map((listing: any) => {
-    const property = listing.properties?.[0];
-    const fullName = property?.profiles?.full_name ?? "Host";
-    const nameParts = fullName.split(" ");
+    const amenities = (row.property_amenities ?? [])
+      .map((pa: any) =>
+        Array.isArray(pa.amenities) ? pa.amenities[0]?.name : pa.amenities?.name
+      )
+      .filter((name: unknown): name is string => Boolean(name));
 
     return {
-      id: listing.id,
-      title: listing.title,
-      description: listing.description ?? "",
-      city: listing.location_text ?? "",
-      country: "",
-      pricePerNight: Number(listing.base_price),
-      bedrooms: property?.bedrooms ?? 0,
-      bathrooms: Number(property?.bathrooms ?? 0),
-      maxGuests: property?.max_guests ?? 1,
-      photos: imagesByListing.get(listing.id) ?? [
-        "/placeholder-property.jpg",
-      ],
-      type: listing.type,
-      avgRating: Number(listing.rating_average),
-      reviewCount: listing.review_count ?? 0,
+      id: row.id,
+      title: row.title,
+      description: row.description ?? "",
+      city: row.location_name,
+      country: "Kenya",
+      pricePerNight: Number(row.price_per_night),
+      bedrooms: row.bedrooms,
+      bathrooms: row.bathrooms,
+      maxGuests: row.max_guests,
+      photos: photos.length ? photos : ["/placeholder-property.jpg"],
+      type: row.type,
+      avgRating: Number(row.rating_average),
+      reviewCount: row.review_count,
       host: {
-        id: property?.profiles?.id ?? listing.owner_id,
-        firstName: nameParts[0] ?? "Host",
-        lastName: nameParts.slice(1).join(" "),
-        isVerified:
-          property?.profiles?.verification_status === "verified",
+        id: row.host_id,
+        firstName: "Host",
+        lastName: "",
+        isVerified: false,
       },
-      amenities:
-        amenitiesByProperty.get(property?.id) ?? [],
+      amenities,
     };
   });
 }
@@ -199,27 +138,14 @@ const fmt = (n: number) =>
     : n.toString();
 
 const TYPE_LABELS: Record<string, string> = {
-  VILLA: "Villa",
-  HOUSE: "House",
-  APARTMENT: "Apartment",
-  GUESTHOUSE: "Guesthouse",
-  SAFARI_LODGE: "Lodge",
-  CAMP: "Camp",
+  villa: "Villa",
+  house: "House",
+  apartment: "Apartment",
+  guesthouse: "Guesthouse",
+  lodge: "Lodge",
+  camp: "Camp",
 };
 
-const AMENITY_ICONS: Record<
-  string,
-  { icon: string; label: string }
-> = {
-  pool: { icon: "⬡", label: "Pool" },
-  wifi: { icon: "⬡", label: "WiFi" },
-  kitchen: { icon: "⬡", label: "Kitchen" },
-  parking: { icon: "⬡", label: "Parking" },
-  ac: { icon: "⬡", label: "A/C" },
-  gym: { icon: "⬡", label: "Gym" },
-  garden: { icon: "⬡", label: "Garden" },
-  view: { icon: "⬡", label: "View" },
-};
 
 const PROPERTY_AMENITIES: Record<string, string[]> = {
   "1": ["pool", "view", "garden", "wifi", "parking"],
@@ -240,42 +166,16 @@ function Section3D({
   children: React.ReactNode;
   className?: string;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start 0.92", "start 0.25"],
-  });
-
-  const rotateX = useSpring(
-    useTransform(scrollYProgress, [0, 1], [22, 0]),
-    { stiffness: 80, damping: 18 }
-  );
-
-  const opacity = useTransform(
-    scrollYProgress,
-    [0, 0.45],
-    [0, 1]
-  );
-
-  const y = useSpring(
-    useTransform(scrollYProgress, [0, 1], [50, 0]),
-    { stiffness: 80, damping: 18 }
-  );
-
   return (
-    <div ref={ref} style={{ perspective: "1200px" }}>
-      <motion.div
-        style={{
-          rotateX,
-          opacity,
-          y,
-          transformOrigin: "top center",
-        }}
-        className={className}
-      >
-        {children}
-      </motion.div>
-    </div>
+    <motion.div
+      initial={{ opacity: 0, y: 32 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-80px" }}
+      transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+      className={className}
+    >
+      {children}
+    </motion.div>
   );
 }
 
@@ -656,46 +556,6 @@ function PerspectiveCard({
   index: number;
 }) {
   const [fav, setFav] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
-
-  const mx = useMotionValue(0);
-  const my = useMotionValue(0);
-
-  const ry = useSpring(
-    useTransform(mx, [-0.5, 0.5], [-10, 10]),
-    { stiffness: 260, damping: 24 }
-  );
-
-  const rx = useSpring(
-    useTransform(my, [-0.5, 0.5], [7, -7]),
-    { stiffness: 260, damping: 24 }
-  );
-
-  const glowX = useTransform(
-    mx,
-    [-0.5, 0.5],
-    ["0%", "100%"]
-  );
-
-  const glowY = useTransform(
-    my,
-    [-0.5, 0.5],
-    ["0%", "100%"]
-  );
-
-  const onMove = (e: React.MouseEvent) => {
-    if (!cardRef.current) return;
-
-    const rect = cardRef.current.getBoundingClientRect();
-
-    mx.set((e.clientX - rect.left) / rect.width - 0.5);
-    my.set((e.clientY - rect.top) / rect.height - 0.5);
-  };
-
-  const onLeave = () => {
-    mx.set(0);
-    my.set(0);
-  };
 
   const isTall = index === 0 || index === 3;
 
@@ -714,23 +574,16 @@ function PerspectiveCard({
         ease: [0.22, 1, 0.36, 1],
       }}
       className={`group ${isTall ? "row-span-2" : ""}`}
-      style={{ perspective: "700px" }}
     >
       <motion.div
-        ref={cardRef}
         style={{
-          rotateX: rx,
-          rotateY: ry,
-          transformStyle: "preserve-3d",
           background: "rgba(8,20,12,0.6)",
           border: "1px solid rgba(163,191,174,0.12)",
         }}
-        onMouseMove={onMove}
-        onMouseLeave={onLeave}
         whileHover={{
-          scale: 1.025,
+          y: -6,
           boxShadow:
-            "0 40px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(52,211,153,0.12)",
+            "0 30px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(52,211,153,0.12)",
         }}
         transition={{
           type: "spring",
@@ -739,13 +592,6 @@ function PerspectiveCard({
         }}
         className="relative overflow-hidden rounded-2xl h-full cursor-pointer"
       >
-        <motion.div
-          className="absolute inset-0 pointer-events-none z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-          style={{
-            background: `radial-gradient(circle at ${glowX} ${glowY}, rgba(52,211,153,0.08) 0%, transparent 60%)`,
-          }}
-        />
-
         <a
           href={`/staycation/${property.id}`}
           className={`block relative overflow-hidden ${
@@ -822,13 +668,7 @@ function PerspectiveCard({
           </div>
         </a>
 
-        <div
-          className="p-5"
-          style={{
-            transform: "translateZ(14px)",
-            transformStyle: "preserve-3d",
-          }}
-        >
+        <div className="p-5">
           <a
             href={`/staycation/${property.id}`}
             className="block"
@@ -860,28 +700,7 @@ function PerspectiveCard({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-1.5 pt-3 border-t border-white/5">
-            {amenities.map((key) => {
-              const amenity = AMENITY_ICONS[key];
-
-              if (!amenity) return null;
-
-              return (
-                <span
-                  key={key}
-                  className="px-2 py-1 rounded-md text-[9px] text-white/32"
-                  style={{
-                    background:
-                      "rgba(52,211,153,0.05)",
-                    border:
-                      "1px solid rgba(52,211,153,0.08)",
-                  }}
-                >
-                  {amenity.label}
-                </span>
-              );
-            })}
-          </div>
+          
         </div>
       </motion.div>
     </motion.div>
@@ -893,31 +712,8 @@ const PerspectiveShowcase = ({
 }: {
   properties: StayProperty[];
 }) => {
-  const ref = useRef<HTMLDivElement>(null);
-
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start end", "end start"],
-  });
-
-  const gridRotateX = useSpring(
-    useTransform(scrollYProgress, [0, 1], [-28, 0]),
-    { stiffness: 60, damping: 20 }
-  );
-
-  const gridScale = useSpring(
-    useTransform(scrollYProgress, [0, 1], [0.88, 1]),
-    { stiffness: 60, damping: 20 }
-  );
-
-  const gridOpacity = useTransform(
-    scrollYProgress,
-    [0, 0.3],
-    [0, 1]
-  );
-
   return (
-    <section ref={ref} className="py-20 overflow-hidden">
+    <section className="py-20 overflow-hidden">
       <div className="max-w-[1440px] mx-auto px-8 md:px-16">
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -957,30 +753,14 @@ const PerspectiveShowcase = ({
           </a>
         </motion.div>
 
-        <div
-          style={{
-            perspective: "1100px",
-            perspectiveOrigin: "50% 30%",
-          }}
-        >
-          <motion.div
-            style={{
-              rotateX: gridRotateX,
-              scale: gridScale,
-              opacity: gridOpacity,
-              transformStyle: "preserve-3d",
-            }}
-          >
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 auto-rows-[220px]">
-              {properties.map((property, index) => (
-                <PerspectiveCard
-                  key={property.id}
-                  property={property}
-                  index={index}
-                />
-              ))}
-            </div>
-          </motion.div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 auto-rows-[220px]">
+          {properties.map((property, index) => (
+            <PerspectiveCard
+              key={property.id}
+              property={property}
+              index={index}
+            />
+          ))}
         </div>
       </div>
     </section>
@@ -996,38 +776,6 @@ const CinematicCard = ({
 }) => {
   const [fav, setFav] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  const mouseX = useMotionValue(0);
-  const mouseY = useMotionValue(0);
-
-  const rotateY = useSpring(
-    useTransform(mouseX, [-0.5, 0.5], [-12, 12]),
-    { stiffness: 200, damping: 22 }
-  );
-
-  const rotateX = useSpring(
-    useTransform(mouseY, [-0.5, 0.5], [8, -8]),
-    { stiffness: 200, damping: 22 }
-  );
-
-  const onMove = (e: React.MouseEvent) => {
-    if (!ref.current) return;
-
-    const rect = ref.current.getBoundingClientRect();
-
-    mouseX.set(
-      (e.clientX - rect.left) / rect.width - 0.5
-    );
-    mouseY.set(
-      (e.clientY - rect.top) / rect.height - 0.5
-    );
-  };
-
-  const onLeave = () => {
-    mouseX.set(0);
-    mouseY.set(0);
-  };
 
   const amenities =
     PROPERTY_AMENITIES[property.id] ?? ["wifi", "pool"];
@@ -1043,32 +791,20 @@ const CinematicCard = ({
         ease: [0.22, 1, 0.36, 1],
       }}
       className="shrink-0 w-[340px] md:w-[400px] group"
-      style={{ perspective: "800px" }}
     >
       <a
         href={`/staycation/${property.id}`}
         className="block"
       >
         <motion.div
-          ref={ref}
-          style={{
-            rotateY,
-            rotateX,
-            transformStyle: "preserve-3d",
-          }}
-          onMouseMove={onMove}
-          onMouseLeave={onLeave}
-          whileHover={{ scale: 1.02 }}
+          whileHover={{ y: -6 }}
           transition={{
             type: "spring",
             stiffness: 250,
             damping: 28,
           }}
         >
-          <div
-            className="relative h-[480px] md:h-[540px] rounded-2xl overflow-hidden mb-5 bg-[#051009]"
-            style={{ transformStyle: "preserve-3d" }}
-          >
+          <div className="relative h-[480px] md:h-[540px] rounded-2xl overflow-hidden mb-5 bg-[#051009]">
             <motion.img
               src={property.photos[0]}
               alt={property.title}
@@ -1148,18 +884,11 @@ const CinematicCard = ({
               className="absolute -bottom-4 inset-x-10 h-6 blur-xl rounded-full opacity-50"
               style={{
                 background: "rgba(52,211,153,0.1)",
-                transform: "translateZ(-20px)",
               }}
             />
           </div>
 
-          <div
-            className="px-1"
-            style={{
-              transform: "translateZ(15px)",
-              transformStyle: "preserve-3d",
-            }}
-          >
+          <div className="px-1">
             <div className="flex items-start justify-between mb-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 mb-1.5">
@@ -1209,34 +938,7 @@ const CinematicCard = ({
               </div>
             </div>
 
-            <div className="pt-3 border-t border-white/5">
-              <p className="text-[8px] uppercase tracking-[0.18em] text-white/18 font-semibold mb-2">
-                Amenities
-              </p>
-
-              <div className="flex flex-wrap gap-1.5">
-                {amenities.map((key) => {
-                  const amenity = AMENITY_ICONS[key];
-
-                  if (!amenity) return null;
-
-                  return (
-                    <span
-                      key={key}
-                      className="px-2.5 py-1 rounded-lg text-[10px] text-white/35 font-medium"
-                      style={{
-                        background:
-                          "rgba(52,211,153,0.05)",
-                        border:
-                          "1px solid rgba(52,211,153,0.09)",
-                      }}
-                    >
-                      {amenity.label}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
+      
           </div>
         </motion.div>
       </a>
@@ -1678,38 +1380,6 @@ const GridCard = ({
 }) => {
   const [fav, setFav] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  const mouseX = useMotionValue(0);
-  const mouseY = useMotionValue(0);
-
-  const rotateY = useSpring(
-    useTransform(mouseX, [-0.5, 0.5], [-6, 6]),
-    { stiffness: 250, damping: 28 }
-  );
-
-  const rotateX = useSpring(
-    useTransform(mouseY, [-0.5, 0.5], [4, -4]),
-    { stiffness: 250, damping: 28 }
-  );
-
-  const onMove = (e: React.MouseEvent) => {
-    if (!ref.current) return;
-
-    const rect = ref.current.getBoundingClientRect();
-
-    mouseX.set(
-      (e.clientX - rect.left) / rect.width - 0.5
-    );
-    mouseY.set(
-      (e.clientY - rect.top) / rect.height - 0.5
-    );
-  };
-
-  const onLeave = () => {
-    mouseX.set(0);
-    mouseY.set(0);
-  };
 
   const amenities = (
     PROPERTY_AMENITIES[property.id] ?? ["wifi", "pool"]
@@ -1717,8 +1387,8 @@ const GridCard = ({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 30, rotateX: 12 }}
-      whileInView={{ opacity: 1, y: 0, rotateX: 0 }}
+      initial={{ opacity: 0, y: 30 }}
+      whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-50px" }}
       transition={{
         delay: index * 0.05,
@@ -1726,24 +1396,17 @@ const GridCard = ({
         ease: [0.22, 1, 0.36, 1],
       }}
       className="group h-full"
-      style={{ perspective: "700px" }}
     >
       <a
         href={`/staycation/${property.id}`}
         className="block h-full"
       >
         <motion.div
-          ref={ref}
           style={{
-            rotateY,
-            rotateX,
-            transformStyle: "preserve-3d",
             background: "rgba(5,16,9,0.5)",
             border: "1px solid rgba(163,191,174,0.12)",
             backdropFilter: "blur(16px)",
           }}
-          onMouseMove={onMove}
-          onMouseLeave={onLeave}
           whileHover={{
             y: -8,
             boxShadow:
@@ -1822,10 +1485,7 @@ const GridCard = ({
             </div>
           </div>
 
-          <div
-            className="p-5 flex flex-col flex-1"
-            style={{ transform: "translateZ(12px)" }}
-          >
+          <div className="p-5 flex flex-col flex-1">
             <div className="flex items-center gap-1.5 mb-2">
               <MapPin
                 className="text-emerald-400/50"
@@ -1850,28 +1510,7 @@ const GridCard = ({
               {property.description}
             </p>
 
-            <div className="flex flex-wrap gap-1.5 mb-4">
-              {amenities.map((key) => {
-                const amenity = AMENITY_ICONS[key];
-
-                if (!amenity) return null;
-
-                return (
-                  <span
-                    key={key}
-                    className="px-2 py-1 rounded-md text-[9px] text-white/30"
-                    style={{
-                      background:
-                        "rgba(52,211,153,0.05)",
-                      border:
-                        "1px solid rgba(52,211,153,0.08)",
-                    }}
-                  >
-                    {amenity.label}
-                  </span>
-                );
-              })}
-            </div>
+        
 
             <div className="flex items-center gap-4 py-3 border-t border-white/5 mb-3">
               <div className="flex items-center gap-1.5 text-white/30 text-xs">

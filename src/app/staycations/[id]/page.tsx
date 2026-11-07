@@ -1,669 +1,407 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
-import { searchApi } from '@/lib/api';
+import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase';
 
-// ─── DESIGN TOKENS ────────────────────────────────────
-const DESIGN_SYSTEM = {
-  // Color Palette: Ultra-minimal Swiss luxury
-  colors: {
-    bg: {
-      primary: '#0f0f0f',      // Near-black
-      secondary: '#1a1a1a',    // Slightly lighter
-      tertiary: '#2a2a2a',     // Card/subtle backgrounds
-    },
-    text: {
-      primary: '#ffffff',      // White text
-      secondary: '#b0b0b0',    // Muted/captions
-      muted: '#808080',        // Disabled/hints
-    },
-    accent: {
-      warm: '#d4a574',         // Refined gold
-      cool: '#6b9b8f',         // Soft sage (replaces bright emerald)
-    },
-    border: '#333333',         // Subtle dividers
-  },
-  
-  // Typography scale
-  typography: {
-    display: { size: '3.5rem', weight: 300, family: 'Playfair Display' },
-    title: { size: '1.5rem', weight: 600, family: 'Inter' },
-    body: { size: '1rem', weight: 400, family: 'Inter' },
-    caption: { size: '0.85rem', weight: 500, family: 'Inter' },
-  },
-
-  // Spacing (8px base)
-  spacing: {
-    xs: '8px',
-    sm: '16px',
-    md: '24px',
-    lg: '32px',
-    xl: '48px',
-    xxl: '64px',
-  },
-
-  // Motion
-  motion: {
-    fast: { duration: 0.3 },
-    normal: { duration: 0.5 },
-    slow: { duration: 0.8 },
-  },
-};
-
-// ─── TYPES ───────────────────────────────────────────
-interface Property {
+interface StayProperty {
   id: string;
   title: string;
   description: string;
-  city: string;
-  country: string;
-  pricePerNight: number;
+  locationText: string;
+  basePrice: number;
+  currency: string;
+  type: string;
+  ratingAverage: number;
+  reviewCount: number;
+  photos: string[];
+  amenities: string[];
   bedrooms: number;
   bathrooms: number;
   maxGuests: number;
-  photos: string[];
-  type: string;
-  avgRating: number;
-  reviewCount: number;
-  host: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    avatar?: string;
-    isVerified: boolean;
-  };
+  hostName: string;
+  hostVerified: boolean;
 }
 
-interface SearchFilters {
-  city?: string;
-  country?: string;
-  minPrice?: number;
-  maxPrice?: number;
-  guests?: number;
-  type?: string;
-  page?: number;
-  limit?: number;
-}
+export default function StaycationDetailPage() {
+  const params = useParams();
+  const listingId = params?.id as string;
 
-// ─── GLOBAL STYLES ───────────────────────────────────
-const GlobalStyles = () => (
-  <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,300;0,400;0,600;1,400&family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    * {
-      font-family: 'Inter', sans-serif;
-    }
-
-    .font-serif {
-      font-family: 'Playfair Display', serif;
-    }
-
-    ::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: ${DESIGN_SYSTEM.colors.accent.cool};
-      opacity: 0.3;
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      opacity: 0.5;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    body {
-      background: ${DESIGN_SYSTEM.colors.bg.primary};
-      color: ${DESIGN_SYSTEM.colors.text.primary};
-    }
-
-    button:focus-visible {
-      outline: 2px solid ${DESIGN_SYSTEM.colors.accent.warm};
-      outline-offset: 2px;
-    }
-
-    input:focus-visible,
-    select:focus-visible {
-      outline: 2px solid ${DESIGN_SYSTEM.colors.accent.warm};
-      outline-offset: 0;
-    }
-  `}</style>
-);
-
-// ─── HEADER/NAVIGATION ───────────────────────────────
-const Header = () => (
-  <motion.header 
-    initial={{ y: -60 }}
-    animate={{ y: 0 }}
-    transition={DESIGN_SYSTEM.motion.normal}
-    className="fixed top-0 left-0 w-full z-50 backdrop-blur-sm border-b"
-    style={{
-      backgroundColor: `${DESIGN_SYSTEM.colors.bg.primary}dd`,
-      borderColor: DESIGN_SYSTEM.colors.border,
-    }}
-  >
-    <div className="max-w-7xl mx-auto px-6 md:px-12 py-4 flex justify-between items-center">
-      <Link href="/" className="font-serif text-2xl font-light tracking-tight">
-        Sundowner
-      </Link>
-      
-      <nav className="hidden md:flex gap-12 text-sm font-medium">
-        <Link href="/" style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="hover:text-white transition">
-          Home
-        </Link>
-        <Link href="/properties" style={{ color: DESIGN_SYSTEM.colors.accent.warm }} className="transition">
-          Properties
-        </Link>
-        <Link href="/experiences" style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="hover:text-white transition">
-          Experiences
-        </Link>
-        <Link href="/about" style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="hover:text-white transition">
-          About
-        </Link>
-      </nav>
-
-      <Link href="/auth/login" className="px-6 py-2 font-medium text-sm transition border" style={{
-        backgroundColor: DESIGN_SYSTEM.colors.accent.warm,
-        color: DESIGN_SYSTEM.colors.bg.primary,
-        borderColor: DESIGN_SYSTEM.colors.accent.warm,
-      }}>
-        Sign In
-      </Link>
-    </div>
-  </motion.header>
-);
-
-// ─── HERO BANNER (IMAGE-FIRST) ───────────────────────
-const HeroBanner = ({ property }: { property: Property | null }) => {
-  if (!property) return null;
-
-  return (
-    <motion.section
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={DESIGN_SYSTEM.motion.slow}
-      className="relative w-full h-screen md:h-125 overflow-hidden"
-    >
-      {/* Background Image - Hero */}
-      <motion.img
-        initial={{ scale: 1.05 }}
-        animate={{ scale: 1 }}
-        transition={{ duration: 1.5, ease: 'easeOut' }}
-        src={property.photos[0]}
-        alt={property.title}
-        className="absolute inset-0 w-full h-full object-cover"
-      />
-
-      {/* Minimal overlay - just enough to read text */}
-      <div 
-        className="absolute inset-0"
-        style={{
-          background: `linear-gradient(to top, ${DESIGN_SYSTEM.colors.bg.primary}99 0%, transparent 40%)`
-        }}
-      />
-
-      {/* Content - bottom-left, minimal */}
-      <div className="absolute inset-0 flex flex-col justify-end">
-        <div className="max-w-7xl mx-auto px-6 md:px-12 w-full pb-16 md:pb-20">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3, ...DESIGN_SYSTEM.motion.normal }}
-            className="max-w-2xl"
-          >
-            {/* Simple location + rating */}
-            <div className="flex items-center gap-6 mb-8">
-              <div style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-sm font-medium">
-                {property.city}, {property.country}
-              </div>
-              <div className="w-px h-4" style={{ backgroundColor: DESIGN_SYSTEM.colors.border }} />
-              <div className="flex items-center gap-2">
-                <span style={{ color: DESIGN_SYSTEM.colors.accent.warm }}>★</span>
-                <span style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-sm">
-                  {property.avgRating.toFixed(1)}
-                </span>
-              </div>
-            </div>
-
-            {/* Title only */}
-            <h1 className="font-serif text-5xl md:text-6xl font-light leading-tight mb-8">
-              {property.title}
-            </h1>
-
-            {/* Single CTA */}
-            <Link href={`/properties/${property.id}`}>
-              <motion.button
-                whileHover={{ x: 4 }}
-                whileTap={{ scale: 0.98 }}
-                className="px-8 py-3 font-medium text-sm tracking-wide transition"
-                style={{
-                  backgroundColor: DESIGN_SYSTEM.colors.accent.warm,
-                  color: DESIGN_SYSTEM.colors.bg.primary,
-                }}
-              >
-                Explore Property
-              </motion.button>
-            </Link>
-          </motion.div>
-        </div>
-      </div>
-    </motion.section>
-  );
-};
-
-// ─── SEARCH BAR (SIMPLIFIED) ──────────────────────────
-const SearchFilterBar = ({ onFilterChange }: { onFilterChange: (filters: SearchFilters) => void }) => {
-  const [filters, setFilters] = useState<SearchFilters>({ page: 1, limit: 12 });
-
-  const handleFilterChange = useCallback((key: string, value: any) => {
-    const updated = { ...filters, [key]: value || undefined, page: 1 };
-    setFilters(updated);
-    onFilterChange(updated);
-  }, [filters, onFilterChange]);
-
-  const hasActiveFilters = Object.keys(filters).some(
-    k => k !== 'page' && k !== 'limit' && filters[k as keyof SearchFilters]
-  );
-
-  return (
-    <motion.section
-      initial={{ opacity: 0 }}
-      whileInView={{ opacity: 1 }}
-      viewport={{ once: true }}
-      transition={DESIGN_SYSTEM.motion.normal}
-      className="max-w-7xl mx-auto px-6 md:px-12"
-      style={{ paddingTop: DESIGN_SYSTEM.spacing.xxl, paddingBottom: DESIGN_SYSTEM.spacing.xl }}
-    >
-      {/* Search Grid - Simplified to 2 columns on desktop */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Location */}
-        <div>
-          <label className="text-xs font-medium mb-3 block" style={{ color: DESIGN_SYSTEM.colors.text.secondary }}>
-            Location
-          </label>
-          <input
-            type="text"
-            placeholder="City or region"
-            onChange={(e) => handleFilterChange('city', e.target.value)}
-            className="w-full px-4 py-3 text-sm font-medium transition border"
-            style={{
-              backgroundColor: DESIGN_SYSTEM.colors.bg.secondary,
-              borderColor: DESIGN_SYSTEM.colors.border,
-              color: DESIGN_SYSTEM.colors.text.primary,
-            }}
-          />
-        </div>
-
-        {/* Price Range */}
-        <div>
-          <label className="text-xs font-medium mb-3 block" style={{ color: DESIGN_SYSTEM.colors.text.secondary }}>
-            Price Range
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="number"
-              placeholder="Min"
-              onChange={(e) => handleFilterChange('minPrice', e.target.value ? Number(e.target.value) : undefined)}
-              className="flex-1 px-4 py-3 text-sm font-medium transition border"
-              style={{
-                backgroundColor: DESIGN_SYSTEM.colors.bg.secondary,
-                borderColor: DESIGN_SYSTEM.colors.border,
-                color: DESIGN_SYSTEM.colors.text.primary,
-              }}
-            />
-            <input
-              type="number"
-              placeholder="Max"
-              onChange={(e) => handleFilterChange('maxPrice', e.target.value ? Number(e.target.value) : undefined)}
-              className="flex-1 px-4 py-3 text-sm font-medium transition border"
-              style={{
-                backgroundColor: DESIGN_SYSTEM.colors.bg.secondary,
-                borderColor: DESIGN_SYSTEM.colors.border,
-                color: DESIGN_SYSTEM.colors.text.primary,
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Property Type */}
-        <div>
-          <label className="text-xs font-medium mb-3 block" style={{ color: DESIGN_SYSTEM.colors.text.secondary }}>
-            Type
-          </label>
-          <select
-            onChange={(e) => handleFilterChange('type', e.target.value || undefined)}
-            className="w-full px-4 py-3 text-sm font-medium transition border appearance-none"
-            style={{
-              backgroundColor: DESIGN_SYSTEM.colors.bg.secondary,
-              borderColor: DESIGN_SYSTEM.colors.border,
-              color: DESIGN_SYSTEM.colors.text.primary,
-            }}
-          >
-            <option value="">All Types</option>
-            <option value="VILLA">Villa</option>
-            <option value="HOUSE">House</option>
-            <option value="APARTMENT">Apartment</option>
-            <option value="GUESTHOUSE">Guesthouse</option>
-            <option value="SAFARI_LODGE">Safari Lodge</option>
-            <option value="CAMP">Camp</option>
-          </select>
-        </div>
-
-        {/* Guests */}
-        <div>
-          <label className="text-xs font-medium mb-3 block" style={{ color: DESIGN_SYSTEM.colors.text.secondary }}>
-            Guests
-          </label>
-          <input
-            type="number"
-            placeholder="Any"
-            min="1"
-            onChange={(e) => handleFilterChange('guests', e.target.value ? Number(e.target.value) : undefined)}
-            className="w-full px-4 py-3 text-sm font-medium transition border"
-            style={{
-              backgroundColor: DESIGN_SYSTEM.colors.bg.secondary,
-              borderColor: DESIGN_SYSTEM.colors.border,
-              color: DESIGN_SYSTEM.colors.text.primary,
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Action Buttons */}
-      <div className="flex gap-4 mt-8">
-        <motion.button
-          whileHover={{ opacity: 0.8 }}
-          onClick={() => {
-            setFilters({ page: 1, limit: 12 });
-            onFilterChange({ page: 1, limit: 12 });
-          }}
-          disabled={!hasActiveFilters}
-          className="px-6 py-3 text-sm font-medium transition border"
-          style={{
-            borderColor: hasActiveFilters ? DESIGN_SYSTEM.colors.border : DESIGN_SYSTEM.colors.border,
-            color: hasActiveFilters ? DESIGN_SYSTEM.colors.accent.warm : DESIGN_SYSTEM.colors.text.secondary,
-            opacity: hasActiveFilters ? 1 : 0.5,
-          }}
-        >
-          Clear Filters
-        </motion.button>
-      </div>
-    </motion.section>
-  );
-};
-
-// ─── PROPERTY CARD (IMAGE-DOMINANT) ────────────────
-const PropertyCard = ({ property, index }: { property: Property; index: number }) => {
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-50px' }}
-      transition={{ delay: index * 0.05, ...DESIGN_SYSTEM.motion.normal }}
-    >
-      <Link href={`/properties/${property.id}`}>
-        <div
-          className="group cursor-pointer overflow-hidden border transition-all duration-500"
-          style={{
-            borderColor: isHovered ? DESIGN_SYSTEM.colors.accent.warm : DESIGN_SYSTEM.colors.border,
-          }}
-          onMouseEnter={() => setIsHovered(true)}
-          onMouseLeave={() => setIsHovered(false)}
-        >
-          {/* Image - 70% of card */}
-          <div className="relative h-96 overflow-hidden bg-black">
-            <motion.img
-              src={property.photos[0]}
-              alt={property.title}
-              className="w-full h-full object-cover"
-              animate={{ scale: isHovered ? 1.05 : 1 }}
-              transition={{ duration: 0.6 }}
-              onLoad={() => setImageLoaded(true)}
-            />
-
-            {/* Minimal overlay on hover - rating */}
-            <AnimatePresence>
-              {isHovered && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 backdrop-blur-sm"
-                  style={{
-                    backgroundColor: `${DESIGN_SYSTEM.colors.bg.primary}cc`,
-                    border: `1px solid ${DESIGN_SYSTEM.colors.border}`,
-                  }}
-                >
-                  <span style={{ color: DESIGN_SYSTEM.colors.accent.warm }}>★</span>
-                  <span className="text-sm font-medium">{property.avgRating.toFixed(1)}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Content - Minimal, clean */}
-          <div className="p-8 space-y-6">
-            {/* Meta */}
-            <div className="space-y-2">
-              <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-xs font-medium">
-                {property.city} • {property.country}
-              </p>
-              <h3 className="font-serif text-xl font-light leading-snug">
-                {property.title}
-              </h3>
-            </div>
-
-            {/* Specs - Horizontal, clean */}
-            <div className="flex gap-8 pt-4" style={{ borderTop: `1px solid ${DESIGN_SYSTEM.colors.border}` }}>
-              <div>
-                <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-xs font-medium mb-1">
-                  Bedrooms
-                </p>
-                <p className="text-lg font-light">{property.bedrooms}</p>
-              </div>
-              <div>
-                <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-xs font-medium mb-1">
-                  Bathrooms
-                </p>
-                <p className="text-lg font-light">{property.bathrooms}</p>
-              </div>
-              <div>
-                <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-xs font-medium mb-1">
-                  Guests
-                </p>
-                <p className="text-lg font-light">{property.maxGuests}</p>
-              </div>
-            </div>
-
-            {/* Price - Bold accent */}
-            <div className="pt-4" style={{ borderTop: `1px solid ${DESIGN_SYSTEM.colors.border}` }}>
-              <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-xs font-medium mb-2">
-                Starting from
-              </p>
-              <p className="font-serif text-2xl font-light" style={{ color: DESIGN_SYSTEM.colors.accent.warm }}>
-                KES {(property.pricePerNight / 1000).toFixed(1)}K
-              </p>
-            </div>
-          </div>
-        </div>
-      </Link>
-    </motion.div>
-  );
-};
-
-// ─── LOADING SKELETON ─────────────────────────────────
-const PropertyCardSkeleton = () => (
-  <div className="space-y-4" style={{ backgroundColor: DESIGN_SYSTEM.colors.bg.secondary }}>
-    <div className="h-96 animate-pulse" style={{ backgroundColor: DESIGN_SYSTEM.colors.border }} />
-    <div className="p-8 space-y-4">
-      <div className="h-3 w-1/2 animate-pulse" style={{ backgroundColor: DESIGN_SYSTEM.colors.border }} />
-      <div className="h-6 w-full animate-pulse" style={{ backgroundColor: DESIGN_SYSTEM.colors.border }} />
-      <div className="h-12 w-1/3 animate-pulse" style={{ backgroundColor: DESIGN_SYSTEM.colors.border }} />
-    </div>
-  </div>
-);
-
-// ─── MAIN COMPONENT ──────────────────────────────────
-export default function PropertiesPage() {
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [featured, setFeatured] = useState<Property | null>(null);
+  const [property, setProperty] = useState<StayProperty | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState<SearchFilters>({});
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch featured property
-  useEffect(() => {
-    const getFeatured = async () => {
-      try {
-        const response = await searchApi.getFeatured();
-        if (response.data && response.data.length > 0) {
-          setFeatured(response.data[0]);
-        }
-      } catch (err) {
-        console.error('Error fetching featured:', err);
-      }
-    };
-    getFeatured();
-  }, []);
+  const [checkIn, setCheckIn] = useState('');
+  const [checkOut, setCheckOut] = useState('');
+  const [guests, setGuests] = useState(1);
+  const [booking, setBooking] = useState(false);
+  const [bookingMessage, setBookingMessage] = useState<string | null>(null);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
-  // Fetch properties with debounce
   useEffect(() => {
-    const getProperties = async () => {
-      setLoading(true);
-      setError(null);
+    if (!listingId) return;
+
+    const loadProperty = async () => {
       try {
-        const response = await searchApi.search(filters);
-        setProperties(response.data.results || []);
+        setLoading(true);
+        setError(null);
+
+        const { data, error: supabaseError } = await supabase
+          .from('listings')
+          .select(`
+            id,
+            title,
+            description,
+            location_text,
+            base_price,
+            currency,
+            type,
+            rating_average,
+            review_count,
+            owner_id,
+            listing_images (
+              url,
+              sort_order,
+              is_cover
+            ),
+            properties (
+              id,
+              bedrooms,
+              bathrooms,
+              max_guests,
+              property_amenities (
+                amenities (
+                  name
+                )
+              ),
+              profiles (
+                id,
+                full_name,
+                verification_status
+              )
+            )
+          `)
+          .eq('id', listingId)
+          .eq('type', 'stay')
+          .eq('status', 'published')
+          .maybeSingle();
+
+        if (supabaseError) {
+          throw new Error(supabaseError.message);
+        }
+
+        if (!data) {
+          setError('This property could not be found.');
+          return;
+        }
+
+        const propertyData = data.properties?.[0];
+        const images = (data.listing_images ?? [])
+          .sort(
+            (a: any, b: any) =>
+              Number(b.is_cover) - Number(a.is_cover) ||
+              a.sort_order - b.sort_order
+          )
+          .map((image: any) => image.url);
+
+        const hostName = propertyData?.profiles?.[0]?.full_name ?? 'Host';
+        const nameParts = hostName.split(' ');
+
+        setProperty({
+          id: data.id,
+          title: data.title,
+          description: data.description ?? '',
+          locationText: data.location_text ?? '',
+          basePrice: Number(data.base_price),
+          currency: data.currency ?? 'KES',
+          type: data.type,
+          ratingAverage: Number(data.rating_average),
+          reviewCount: data.review_count ?? 0,
+          photos:
+            images.length > 0 ? images : ['/placeholder-property.jpg'],
+          amenities: (propertyData?.property_amenities ?? []).map(
+            (item: any) => item.amenities?.name
+          ),
+          bedrooms: propertyData?.bedrooms ?? 0,
+          bathrooms: Number(propertyData?.bathrooms ?? 0),
+          maxGuests: propertyData?.max_guests ?? 1,
+          hostName,
+          hostVerified:
+           propertyData?.profiles?.[0]?.verification_status === 'verified',
+        });
       } catch (err: any) {
-        setError(err.message || 'Failed to load properties');
+        setError(err.message ?? 'Failed to load property');
       } finally {
         setLoading(false);
       }
     };
 
-    const timer = setTimeout(getProperties, 300);
-    return () => clearTimeout(timer);
-  }, [filters]);
+    loadProperty();
+  }, [listingId]);
+
+  const calculateNights = () => {
+    if (!checkIn || !checkOut) return 0;
+
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
+    const difference = end.getTime() - start.getTime();
+
+    return Math.max(0, Math.round(difference / (1000 * 60 * 60 * 24)));
+  };
+
+  const nights = calculateNights();
+  const subtotal = nights * (property?.basePrice ?? 0);
+  const serviceFee = subtotal * 0.1;
+  const total = subtotal + serviceFee;
+
+  const handleReserve = async () => {
+    setBookingError(null);
+    setBookingMessage(null);
+
+    if (!property) return;
+
+    if (!checkIn || !checkOut) {
+      setBookingError('Please select check-in and check-out dates.');
+      return;
+    }
+
+    if (nights < 1) {
+      setBookingError('Check-out must be after check-in.');
+      return;
+    }
+
+    try {
+      setBooking(true);
+
+      const { data, error: rpcError } = await supabase.rpc(
+        'create_booking',
+        {
+          p_listing_id: property.id,
+          p_property_unit_id: null,
+          p_start_date: checkIn,
+          p_end_date: checkOut,
+          p_start_time: null,
+          p_end_time: null,
+          p_guest_count: guests,
+          p_cleaning_fee: 0,
+          p_special_requests: null,
+        }
+      );
+
+      if (rpcError) {
+        throw new Error(rpcError.message);
+      }
+
+      setBookingMessage(
+        `Booking request created. Reference: ${data?.reference ?? 'confirmed'}`
+      );
+    } catch (err: any) {
+      setBookingError(err.message ?? 'Could not create booking');
+    } finally {
+      setBooking(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-[#0f0f0f] text-white flex items-center justify-center">
+        <p>Loading property…</p>
+      </main>
+    );
+  }
+
+  if (error || !property) {
+    return (
+      <main className="min-h-screen bg-[#0f0f0f] text-white flex flex-col items-center justify-center px-6 text-center">
+        <h1 className="text-2xl font-serif mb-4">
+          {error ?? 'Property not found'}
+        </h1>
+        <Link
+          href="/staycation"
+          className="px-6 py-3 bg-[#d4a574] text-black rounded-sm"
+        >
+          Back to stays
+        </Link>
+      </main>
+    );
+  }
 
   return (
-    <main style={{ backgroundColor: DESIGN_SYSTEM.colors.bg.primary }}>
-      <GlobalStyles />
-      <Header />
-      <div className="h-20" />
-
-      {/* Hero Banner */}
-      {featured && <HeroBanner property={featured} />}
-
-      {/* Search & Filter Bar */}
-      <SearchFilterBar onFilterChange={setFilters} />
-
-      {/* Properties Section */}
-      <section className="max-w-7xl mx-auto px-6 md:px-12" style={{ paddingTop: DESIGN_SYSTEM.spacing.xl, paddingBottom: DESIGN_SYSTEM.spacing.xxl }}>
-        {/* Section Header */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          className="mb-16"
+    <main className="min-h-screen bg-[#0f0f0f] text-white">
+      <div className="max-w-7xl mx-auto px-6 md:px-12 pt-28 pb-20">
+        <Link
+          href="/staycation"
+          className="text-sm text-[#b0b0b0] hover:text-white transition"
         >
-          <h2 className="font-serif text-4xl font-light mb-4">
-            Explore Properties
-          </h2>
-          <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-sm font-medium">
-            {loading ? 'Loading...' : `${properties.length} luxury properties`}
-          </p>
+          ← Back to stays
+        </Link>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="mt-8"
+        >
+          <h1 className="font-serif text-4xl md:text-6xl font-light mb-4">
+            {property.title}
+          </h1>
+
+          <div className="flex flex-wrap items-center gap-4 text-sm text-[#b0b0b0]">
+            <span>{property.locationText}</span>
+            <span>★ {property.ratingAverage.toFixed(1)}</span>
+            <span>{property.reviewCount} reviews</span>
+            <span>
+              {property.bedrooms} bedrooms · {property.bathrooms} bathrooms ·
+              up to {property.maxGuests} guests
+            </span>
+          </div>
         </motion.div>
 
-        {/* Error State */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mb-8 p-6 border" 
-              style={{
-                borderColor: '#dc2626',
-                backgroundColor: `#7f1d1d33`,
-              }}
-            >
-              <p className="font-medium mb-2">Error Loading Properties</p>
-              <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-sm">{error}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="mt-10 grid grid-cols-1 lg:grid-cols-3 gap-10">
+          <div className="lg:col-span-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {property.photos.slice(0, 4).map((photo, index) => (
+                <div
+                  key={photo + index}
+                  className={`overflow-hidden rounded-xl bg-[#1a1a1a] ${
+                    index === 0 ? 'md:col-span-2 h-80' : 'h-56'
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={photo}
+                    alt={property.title}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ))}
+            </div>
 
-        {/* Loading Grid */}
-        {loading && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {[...Array(6)].map((_, i) => (
-              <PropertyCardSkeleton key={i} />
-            ))}
+            <div className="mt-10">
+              <h2 className="font-serif text-2xl mb-4">About this stay</h2>
+              <p className="text-[#b0b0b0] leading-relaxed whitespace-pre-line">
+                {property.description}
+              </p>
+            </div>
+
+            {property.amenities.length > 0 && (
+              <div className="mt-10">
+                <h2 className="font-serif text-2xl mb-4">Amenities</h2>
+                <div className="flex flex-wrap gap-3">
+                  {property.amenities.map((amenity) => (
+                    <span
+                      key={amenity}
+                      className="px-4 py-2 text-sm border border-[#333333] rounded-full text-[#b0b0b0]"
+                    >
+                      {amenity}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Properties Grid */}
-        {!loading && properties.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={DESIGN_SYSTEM.motion.normal}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
-          >
-            {properties.map((property, index) => (
-              <PropertyCard key={property.id} property={property} index={index} />
-            ))}
-          </motion.div>
-        )}
+          <aside className="lg:col-span-1">
+            <div className="border border-[#333333] rounded-xl p-6 sticky top-28">
+              <p className="text-sm text-[#b0b0b0] mb-1">From</p>
+              <p className="font-serif text-3xl text-[#d4a574]">
+                {property.currency} {property.basePrice.toLocaleString()}
+                <span className="text-sm text-[#808080]"> / night</span>
+              </p>
 
-        {/* Empty State */}
-        {!loading && properties.length === 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center py-24"
-          >
-            <p style={{ color: DESIGN_SYSTEM.colors.text.secondary }} className="text-lg font-medium mb-4">
-              No properties found
-            </p>
-            <p style={{ color: DESIGN_SYSTEM.colors.text.muted }} className="text-sm mb-8 max-w-md mx-auto">
-              Try adjusting your filters
-            </p>
-            <motion.button
-              whileHover={{ opacity: 0.8 }}
-              onClick={() => setFilters({})}
-              className="px-6 py-3 text-sm font-medium border transition"
-              style={{
-                borderColor: DESIGN_SYSTEM.colors.accent.warm,
-                color: DESIGN_SYSTEM.colors.accent.warm,
-              }}
-            >
-              Clear Filters
-            </motion.button>
-          </motion.div>
-        )}
-      </section>
+              <div className="mt-6 space-y-4">
+                <div>
+                  <label className="block text-xs text-[#b0b0b0] mb-2">
+                    Check-in
+                  </label>
+                  <input
+                    type="date"
+                    value={checkIn}
+                    onChange={(event) => setCheckIn(event.target.value)}
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#333333] rounded-lg"
+                  />
+                </div>
 
-      {/* Footer */}
-      <footer
-        className="text-center text-sm font-medium py-16 border-t"
-        style={{
-          borderColor: DESIGN_SYSTEM.colors.border,
-          color: DESIGN_SYSTEM.colors.text.secondary,
-        }}
-      >
-        <p>Discover luxury stays across Africa</p>
-      </footer>
+                <div>
+                  <label className="block text-xs text-[#b0b0b0] mb-2">
+                    Check-out
+                  </label>
+                  <input
+                    type="date"
+                    value={checkOut}
+                    onChange={(event) => setCheckOut(event.target.value)}
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#333333] rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-[#b0b0b0] mb-2">
+                    Guests
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={property.maxGuests}
+                    value={guests}
+                    onChange={(event) =>
+                      setGuests(Number(event.target.value) || 1)
+                    }
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#333333] rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-2 text-sm text-[#b0b0b0]">
+                <div className="flex justify-between">
+                  <span>
+                    {property.currency} {property.basePrice.toLocaleString()} ×{' '}
+                    {nights} nights
+                  </span>
+                  <span>{property.currency} {subtotal.toLocaleString()}</span>
+                </div>
+
+                <div className="flex justify-between">
+                  <span>Service fee</span>
+                  <span>{property.currency} {serviceFee.toLocaleString()}</span>
+                </div>
+
+                <div className="flex justify-between border-t border-[#333333] pt-3 text-white font-semibold">
+                  <span>Total</span>
+                  <span>{property.currency} {total.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={handleReserve}
+                disabled={booking}
+                className="mt-6 w-full py-4 bg-[#d4a574] text-black font-semibold rounded-lg disabled:opacity-60"
+              >
+                {booking ? 'Creating booking…' : 'Reserve'}
+              </button>
+
+              {bookingError && (
+                <p className="mt-4 text-sm text-red-400">{bookingError}</p>
+              )}
+
+              {bookingMessage && (
+                <p className="mt-4 text-sm text-green-400">
+                  {bookingMessage}
+                </p>
+              )}
+
+              <div className="mt-6 pt-6 border-t border-[#333333]">
+                <p className="text-xs text-[#808080] mb-1">Hosted by</p>
+                <p className="font-medium">
+                  {property.hostName}
+                  {property.hostVerified && ' · Verified'}
+                </p>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
     </main>
   );
 }
